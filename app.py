@@ -8,10 +8,9 @@ from utils import save_message, load_recent_messages
 import json
 import shutil
 import sqlite3
-import uvicorn
 from typing import List
 import httpx
-import asyncio
+import asyncio  # 添加在顶部
 
 DB_FILE = "users.db"
 UPLOAD_DIR = "uploads"
@@ -588,5 +587,7 @@ async def get_deepseek_response(character: str, user_message: str) -> str:
     return "连接好像不太稳定呢，请稍后再试~"
 
 if __name__ == "__main__":
+    import os
+    import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("app:app", host="0.0.0.0", port=port)
