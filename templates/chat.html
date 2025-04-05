@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ nickname }} 的聊天系统</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <style>
+    body { background: #f0f2f5; }
+    .sidebar {
+      width: 260px;
+      background: #fff;
+      border-right: 1px solid #ddd;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar .user-item {
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+      position: relative;
+    }
+    .bubble.ai {
+        background-color: #f0f4ff;
+        border: 1px solid #c3d1ff;
+    }
+    .user-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+    .user-info {
+      flex-grow: 1;
+    }
+    .user-name {
+      font-weight: bold;
+    }
+    .user-status-text {
+      font-size: 12px;
+      color: gray;
+    }
+    .badge-unread {
+      position: absolute;
+      right: 10px;
+      top: 15px;
+      background: red;
+      color: white;
+      border-radius: 10px;
+      font-size: 12px;
+      padding: 2px 6px;
+    }
+    .top-user {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    .top-user img {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      margin-right: 10px;
+    }
+    .chat-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-header, .chat-input {
+      padding: 10px;
+      background: #fff;
+      border-bottom: 1px solid #ddd;
+    }
+    .chat-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 8px;
+      background: #e5ddd5;
+    }
+    .message-row {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 10px;
+    }
+    .left-msg {
+      align-items: flex-start;
+    }
+    .right-msg {
+      align-items: flex-end;
+    }
+    .bubble {
+      display: inline-block;
+      padding: 10px 15px;
+      border-radius: 18px;
+      background: #fff;
+      word-break: break-word;
+      white-space: pre-wrap;
+      box-sizing: border-box;
+      max-width: 60%;
+    }
+    .bubble.me {
+      background-color: #95ec69;
+      color: #000;
+    }
+    .timestamp {
+      font-size: 12px;
+      color: #888;
+      margin-top: 4px;
+    }
+    .chat-placeholder {
+      flex: 1;
+      background: #f9f9f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      color: #888;
+    }
+    .sidebar-footer {
+      padding: 10px;
+      border-top: 1px solid #ddd;
+      margin-top: auto;
+    }
+  </style>
+</head>
+<body>
+<div class="d-flex vh-100">
+  <div class="sidebar">
+    <div class="top-user">
+      <img src="{{ avatar }}" onerror="this.src='/static/avatars/default.png'">
+      <div>
+        <strong>{{ nickname }}</strong><br>
+        <small class="text-muted">{{ username }}</small>
+      </div>
+    </div>
+    <div id="chatList"></div>
+    <div class="sidebar-footer">
+      <button class="btn btn-outline-secondary w-100" onclick="openSettings()">设置</button>
+    </div>
+  </div>
+
+  <div class="chat-area">
+    <div class="chat-header" id="chatHeader">
+      <span class="text-muted">欢迎使用聊天系统</span>
+    </div>
+    <div class="chat-body" id="messages">
+      <div class="chat-placeholder">请选择左侧联系人或群聊开始聊天</div>
+    </div>
+    <div class="chat-input d-flex align-items-center gap-2">
+      <button class="btn btn-light" onclick="toggleUpload()">+</button>
+      <input type="text" id="input" class="form-control" placeholder="请输入消息...">
+      <input type="file" id="fileInput" class="d-none" onchange="uploadFile()">
+      <button class="btn btn-success" onclick="sendMsg()">发送</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    const username = "{{ username }}";
+    const nickname = "{{ nickname }}";
+    const avatar = "{{ avatar }}";
+    const CHARACTER_PROFILES = {{ character_profiles | tojson }};
+    const socket = new WebSocket(`ws://${location.host}/ws/${username}`);
+    const messageMap = new Map();
+    const unreadMap = new Map();
+    let currentTarget = null;
+
+    socket.onopen = () => console.log("✅ WebSocket连接成功");
+
+    socket.onmessage = event => {
+      try {
+        const obj = JSON.parse(event.data);
+        if (obj.type === "users") {
+          const chatList = document.getElementById("chatList");
+          chatList.innerHTML = "";
+          obj.users.forEach(user => {
+            if (user.username === username) return;
+            const div = document.createElement("div");
+            div.className = "user-item";
+            div.innerHTML = `
+              <img src="${user.avatar}" onerror="this.src='/static/avatars/default.png'" class="user-avatar">
+              <div class="user-info">
+                <div class="user-name">${user.nickname}</div>
+                <div class="user-status-text">在线</div>
+              </div>
+              <span id="badge-${user.username}" class="badge-unread d-none"></span>`;
+            div.onclick = () => openChat(user.username);
+            chatList.appendChild(div);
+          });
+          Object.keys(CHARACTER_PROFILES).forEach(name => {
+            const div = document.createElement("div");
+            div.className = "user-item";
+            div.innerHTML = `
+            <img src="${CHARACTER_PROFILES[name] && CHARACTER_PROFILES[name].avatar ? CHARACTER_PROFILES[name].avatar + '?cacheBust=' + Date.now() : '/static/avatars/default.png'}" onerror="this.src='/static/avatars/default.png'" class="user-avatar">
+              <div class="user-info">
+                <div class="user-name">${name}</div>
+                <div class="user-status-text">AI角色</div>
+              </div>
+              <span id="badge-${name}" class="badge-unread d-none"></span>`;
+            div.onclick = () => openChat(name);
+            chatList.appendChild(div);
+          });
+        } else if (obj.type === "private") {
+          const from = obj.from;
+          const msg = createMsgHTML(obj.msg, obj.time, false);
+          // 如果消息是来自当前聊天目标，则直接展示消息
+          if (from === currentTarget) {
+            document.getElementById("messages").appendChild(msg);
+            scrollToBottom();
+          } else {
+            // 否则增加未读计数
+            const badge = document.getElementById(`badge-${from}`);
+            const count = unreadMap.get(from) || 0;
+            unreadMap.set(from, count + 1);
+            badge.textContent = count + 1;
+            badge.classList.remove("d-none");
+          }
+          // 确保 AI 回复也能被记录
+          if (CHARACTER_PROFILES.hasOwnProperty(from)) {
+            if (!messageMap.has(from)) messageMap.set(from, []);
+            messageMap.get(from).push(msg);
+          }
+        }
+      } catch {
+        console.log("❌ 无法解析消息", event.data);
+      }
+    }
+
+    function openChat(user) {
+      currentTarget = user;
+      document.getElementById("chatHeader").innerHTML = `<strong>${user}</strong>`;
+      const msgBox = document.getElementById("messages");
+      msgBox.innerHTML = "";
+      const msgs = messageMap.get(user) || [];
+      msgs.forEach(m => msgBox.appendChild(m));
+      scrollToBottom();
+      unreadMap.set(user, 0);
+      const badge = document.getElementById(`badge-${user}`);
+      if (badge) badge.classList.add("d-none");
+    }
+
+    function createMsgHTML(content, time, isSelf) {
+      const row = document.createElement("div");
+      row.className = `message-row ${isSelf ? 'right-msg' : 'left-msg'}`;
+      const bubble = document.createElement("div");
+      let bubbleClass = 'bubble';
+      if (isSelf) bubbleClass += ' me';
+      if (CHARACTER_PROFILES.hasOwnProperty(currentTarget)) bubbleClass += ' ai';
+      bubble.className = bubbleClass;
+      bubble.innerHTML = content;
+      const ts = document.createElement("div");
+      ts.className = "timestamp";
+      ts.textContent = new Date(time || Date.now()).toLocaleTimeString();
+      row.appendChild(bubble);
+      row.appendChild(ts);
+      return row;
+    }
+
+    function sendMsg() {
+      const input = document.getElementById("input");
+      const msg = input.value.trim();
+      if (!msg || !currentTarget) return;
+      const payload = {
+        type: "private",
+        to: currentTarget,
+        msg: msg,
+        time: Date.now()
+      };
+      socket.send(JSON.stringify(payload));
+      const msgElem = createMsgHTML(msg, payload.time, true);
+      if (!messageMap.has(currentTarget)) messageMap.set(currentTarget, []);
+      messageMap.get(currentTarget).push(msgElem);
+      document.getElementById("messages").appendChild(msgElem);
+      input.value = "";
+      scrollToBottom();
+    }
+
+    function toggleUpload() {
+      document.getElementById("fileInput").click();
+    }
+
+    function uploadFile() {
+      const fileInput = document.getElementById("fileInput");
+      const file = fileInput.files[0];
+      if (!file || !currentTarget) return;
+      const formData = new FormData();
+      formData.append("file", file);
+      fetch("/upload", { method: "POST", body: formData })
+        .then(res => res.json())
+        .then(data => {
+          const filename = data.filename;
+          const isImage = /\.(jpg|jpeg|png|gif|bmp)$/i.test(filename);
+          const fileUrl = `/uploads/${filename}`;
+          const content = isImage ? `<img src="${fileUrl}" style="max-width:200px;">` : `<a href="${fileUrl}" target="_blank">📎 下载文件</a>`;
+          const payload = {
+            type: "private",
+            to: currentTarget,
+            msg: content,
+            time: Date.now()
+          };
+          socket.send(JSON.stringify(payload));
+          const msgElem = createMsgHTML(content, payload.time, true);
+          if (!messageMap.has(currentTarget)) messageMap.set(currentTarget, []);
+          messageMap.get(currentTarget).push(msgElem);
+          document.getElementById("messages").appendChild(msgElem);
+          scrollToBottom();
+        });
+    }
+
+    function scrollToBottom() {
+      const container = document.getElementById("messages");
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function openSettings() {
+      const modal = new bootstrap.Modal(document.getElementById("settingsModal"));
+      modal.show();
+
+      // 给表单绑定提交事件（只绑定一次）
+      const form = document.querySelector("#settingsModal form");
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const res = await fetch("/update_profile", {
+          method: "POST",
+          body: formData,
+        });
+        if (res.ok) {
+          modal.hide();
+          // ✅ 更新左上角信息
+          const newName = formData.get("nickname");
+          const newUsername = formData.get("new_username");
+          document.querySelector(".top-user strong").textContent = newName;
+          document.querySelector(".top-user small").textContent = newUsername;
+          document.querySelector(".top-user img").src = `/static/avatars/${newUsername}.png?cacheBust=${Date.now()}`;
+          alert("修改成功！");
+          location.reload();  // 可选：刷新页面彻底同步所有数据
+        } else {
+          alert("修改失败！");
+        }
+      };
+    }
+  </script>
+
+  <!-- 设置模态框 -->
+  <div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form method="post" enctype="multipart/form-data" action="/update_profile">
+          <div class="modal-header">
+            <h5 class="modal-title">修改个人信息</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" name="old_username" value="{{ username }}">
+            <div class="mb-3">
+              <label class="form-label">新用户名</label>
+              <input type="text" name="new_username" class="form-control" value="{{ username }}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">昵称</label>
+              <input type="text" name="nickname" class="form-control" value="{{ nickname }}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">新密码</label>
+              <input type="password" name="password" class="form-control" placeholder="可留空不修改">
+            </div>
+            <div class="mb-3">
+              <label class="form-label">头像</label>
+              <input type="file" name="avatar" class="form-control">
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="submit" class="btn btn-primary">保存修改</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
